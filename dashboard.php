@@ -1,8 +1,6 @@
 <?php
 require 'config.php';
-session_start();
 
-// Check login
 if (!isset($_SESSION['user_id'])) {
     header("Location: index.php");
     exit;
@@ -10,87 +8,88 @@ if (!isset($_SESSION['user_id'])) {
 
 $user_id = $_SESSION['user_id'];
 
-// Only allow POST
-if ($_SERVER["REQUEST_METHOD"] !== "POST") {
-    header("Location: dashboard.php");
-    exit;
-}
+$userStmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+$userStmt->execute([$user_id]);
+$user = $userStmt->fetch();
 
-// Check candidate selected
-if (!isset($_POST['candidate_id'])) {
-    $_SESSION['msg'] = ["type" => "warning", "text" => "Please select a candidate."];
-    header("Location: dashboard.php");
-    exit;
-}
+$positions = $pdo->query("SELECT * FROM positions")->fetchAll();
+?>
 
-$candidate_id = (int)$_POST['candidate_id'];
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kura Safi | Voting</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
 
-/*
--------------------------------------
-1️⃣ Get position of selected candidate
--------------------------------------
-*/
+<div class="container mt-4">
 
-$stmt = $pdo->prepare("
-    SELECT p.name 
-    FROM candidates c
-    JOIN positions p ON c.position_id = p.id
-    WHERE c.id = ?
-");
-$stmt->execute([$candidate_id]);
-$position = $stmt->fetchColumn();
+    <a href="logout.php" class="btn btn-danger btn-sm float-end">Logout</a>
+    <h3 class="text-success">Kura Safi Voting Dashboard</h3>
 
-if (!$position) {
-    $_SESSION['msg'] = ["type" => "danger", "text" => "Invalid candidate."];
-    header("Location: dashboard.php");
-    exit;
-}
+    <?php if (isset($_SESSION['msg'])): ?>
+        <div class="alert alert-<?= $_SESSION['msg']['type']; ?>">
+            <?= $_SESSION['msg']['text']; ?>
+        </div>
+        <?php unset($_SESSION['msg']); ?>
+    <?php endif; ?>
 
-// Determine vote column
-$field = ($position === 'President') ? 'voted_president' : 'voted_vice';
+    <?php foreach ($positions as $pos): ?>
 
-/*
--------------------------------------
-2️⃣ Check if already voted
--------------------------------------
-*/
+        <?php
+        $voted = ($pos['name'] === 'President')
+            ? $user['voted_president']
+            : $user['voted_vice'];
 
-$check = $pdo->prepare("SELECT $field FROM users WHERE id = ?");
-$check->execute([$user_id]);
+        $candidatesStmt = $pdo->prepare("SELECT * FROM candidates WHERE position_id = ?");
+        $candidatesStmt->execute([$pos['id']]);
+        $candidates = $candidatesStmt->fetchAll();
+        ?>
 
-if ($check->fetchColumn()) {
-    $_SESSION['msg'] = ["type" => "warning", "text" => "You have already voted for $position."];
-    header("Location: dashboard.php");
-    exit;
-}
+        <div class="card my-3">
+            <div class="card-header bg-success text-white">
+                <?= htmlspecialchars($pos['name']); ?>
+            </div>
+            <div class="card-body">
 
-/*
--------------------------------------
-3️⃣ Record vote
--------------------------------------
-*/
+                <?php if ($voted): ?>
+                    <div class="alert alert-success">
+                        You have already voted.
+                    </div>
+                <?php else: ?>
 
-try {
-    $pdo->beginTransaction();
+                    <form method="POST" action="voter_handler.php">
 
-    $pdo->prepare("
-        INSERT INTO votes (user_id, candidate_id)
-        VALUES (?, ?)
-    ")->execute([$user_id, $candidate_id]);
+                        <?php foreach ($candidates as $c): ?>
+                            <div class="form-check">
+                                <input class="form-check-input"
+                                       type="radio"
+                                       name="candidate_id"
+                                       value="<?= $c['id']; ?>"
+                                       required>
+                                <label class="form-check-label">
+                                    <?= htmlspecialchars($c['name']); ?>
+                                </label>
+                            </div>
+                        <?php endforeach; ?>
 
-    $pdo->prepare("
-        UPDATE users SET $field = 1
-        WHERE id = ?
-    ")->execute([$user_id]);
+                        <button type="submit" class="btn btn-success mt-3">
+                            Submit Vote
+                        </button>
 
-    $pdo->commit();
+                    </form>
 
-    $_SESSION['msg'] = ["type" => "success", "text" => "Vote recorded successfully!"];
+                <?php endif; ?>
 
-} catch (Exception $e) {
-    $pdo->rollBack();
-    $_SESSION['msg'] = ["type" => "danger", "text" => "Vote failed. Try again."];
-}
+            </div>
+        </div>
 
-header("Location: dashboard.php");
-exit;
+    <?php endforeach; ?>
+
+    <a href="results.php" class="btn btn-outline-success">View Results</a>
+
+</div>
+
+</body>
+</html>
